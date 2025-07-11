@@ -64,4 +64,5 @@ It's built with care to include voice, gesture ideas, and accessibility.
 **Hamsa B K**  
 _ThinkBoard Project | July 2025_
 
----
+------    
+         
