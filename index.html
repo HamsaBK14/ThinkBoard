@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>ThinkBoard</title>
+  <style>
+    body {
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      background: #f0f0f0;
+      font-family: Arial, sans-serif;
+    }
+
+    canvas, video {
+      border: 2px solid #000;
+      margin-top: 10px;
+      background: #fff;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 10px;
+    }
+
+    .toolbar button, .toolbar select, .toolbar input[type="color"] {
+      padding: 4px 8px;
+      font-size: 12px;
+      border-radius: 6px;
+    }
+
+    .note {
+      position: absolute;
+      background: yellow;
+      padding: 5px;
+      border: 1px solid #333;
+      font-size: 12px;
+      max-width: 150px;
+      z-index: 10;
+    }
+
+    #videoWrapper {
+      position: relative;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <h1>ThinkBoard</h1>
+
+  <div class="toolbar">
+    <select id="brushType">
+      <option value="pencil">Pencil</option>
+      <option value="marker">Marker</option>
+      <option value="glow">Glow</option>
+      <option value="spray">Spray</option>
+    </select>
+
+    <input type="color" id="colorPicker" value="#000000">
+    <input type="range" id="brushSize" min="1" max="50" value="5" />
+
+    <button onclick="setEraser()">Eraser</button>
+    <button onclick="undo()">Undo</button>
+    <button onclick="clearCanvas()">Clear</button>
+    <button onclick="save()">Save</button>
+    <button onclick="captureCanvas()">Capture</button>
+    <button onclick="smartSuggest()">Smart Suggest</button>
+    <button onclick="enableNoteMode()">Add Note</button>
+    <button onclick="enableVoiceNote()">🎙️ Voice Note</button>
+    <button onclick="makeTimelapse()">Make Timelapse</button>
+    <button onclick="startColorPicker()">🌈 Pick Real Color</button>
+  </div>
+
+  <div style="position: relative;">
+    <canvas id="canvas" width="800" height="500"></canvas>
+  </div>
+
+  <div id="videoWrapper">
+    <video id="video" width="400" height="300" autoplay></video>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    let painting = false;
+    let currentColor = document.getElementById("colorPicker").value;
+    let brushSize = document.getElementById("brushSize").value;
+    let brushType = document.getElementById("brushType").value;
+    let isErasing = false;
+    let paths = [];
+    let snapshots = [];
+    let noteMode = false;
+    let voiceNote = false;
+    let capturedSpeech = "";
+
+    document.getElementById("colorPicker").addEventListener("change", (e) => {
+      currentColor = e.target.value;
+      isErasing = false;
+    });
+
+    document.getElementById("brushSize").addEventListener("input", (e) => {
+      brushSize = e.target.value;
+    });
+
+    document.getElementById("brushType").addEventListener("change", (e) => {
+      brushType = e.target.value;
+    });
+
+    canvas.addEventListener("mousedown", startPosition);
+    canvas.addEventListener("mouseup", endPosition);
+    canvas.addEventListener("mouseout", endPosition);
+    canvas.addEventListener("mousemove", draw);
+
+    canvas.addEventListener("click", function(e) {
+      const rect = canvas.getBoundingClientRect();
+      const x = rect.left + e.offsetX;
+      const y = rect.top + e.offsetY;
+
+      if (noteMode || voiceNote) {
+        let noteText = "";
+        if (noteMode) {
+          noteText = prompt("Enter your note:");
+        } else if (voiceNote) {
+          noteText = capturedSpeech || "(No speech detected)";
+        }
+
+        if (noteText) {
+          const note = document.createElement("div");
+          note.className = "note";
+          note.style.left = x + "px";
+          note.style.top = y + "px";
+          note.innerText = noteText;
+          document.body.appendChild(note);
+        }
+
+        noteMode = false;
+        voiceNote = false;
+        capturedSpeech = "";
+      }
+    });
+
+    function startPosition(e) {
+      if (!noteMode && !voiceNote) {
+        painting = true;
+        ctx.beginPath();
+        draw(e);
+      }
+    }
+
+    function endPosition() {
+      if (painting) {
+        painting = false;
+        ctx.closePath();
+        paths.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+        snapshots.push(canvas.toDataURL("image/png"));
+      }
+    }
+
+    function draw(e) {
+      if (!painting || noteMode || voiceNote) return;
+
+      const x = e.offsetX;
+      const y = e.offsetY;
+
+      ctx.lineWidth = brushSize;
+      ctx.lineCap = "round";
+      ctx.strokeStyle = isErasing ? "#FFFFFF" : currentColor;
+
+      switch (brushType) {
+        case "marker":
+          ctx.globalAlpha = 0.3;
+          break;
+        case "glow":
+          ctx.shadowBlur = 10;
+          ctx.shadowColor = currentColor;
+          break;
+        case "spray":
+          spray(x, y);
+          return;
+        default:
+          ctx.globalAlpha = 1.0;
+          ctx.shadowBlur = 0;
+      }
+
+      ctx.lineTo(x, y);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+    }
+
+    function spray(x, y) {
+      const density = 20;
+      for (let i = 0; i < density; i++) {
+        const offsetX = Math.random() * brushSize - brushSize / 2;
+        const offsetY = Math.random() * brushSize - brushSize / 2;
+        ctx.fillStyle = currentColor;
+        ctx.fillRect(x + offsetX, y + offsetY, 1, 1);
+      }
+    }
+
+    function setEraser() {
+      isErasing = true;
+    }
+
+    function undo() {
+      if (paths.length > 0) {
+        paths.pop();
+        snapshots.pop();
+        const last = paths[paths.length - 1];
+        if (last) {
+          ctx.putImageData(last, 0, 0);
+        } else {
+          clearCanvas();
+        }
+      }
+    }
+
+    function clearCanvas() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      paths = [];
+      snapshots = [];
+    }
+
+    function save() {
+      const link = document.createElement("a");
+      link.download = "drawing.png";
+      link.href = canvas.toDataURL();
+      link.click();
+    }
+
+    function captureCanvas() {
+      const dataURL = canvas.toDataURL("image/png");
+      const imgWindow = window.open();
+      imgWindow.document.write('<img src="' + dataURL + '" />');
+    }
+
+    function smartSuggest() {
+      const x = Math.random() * (canvas.width - 100);
+      const y = Math.random() * (canvas.height - 100);
+      const width = 120;
+      const height = 100;
+
+      ctx.save();
+      ctx.strokeStyle = "red";
+      ctx.lineWidth = 4;
+      ctx.shadowBlur = 15;
+      ctx.shadowColor = "red";
+      ctx.strokeRect(x, y, width, height);
+      ctx.restore();
+
+      alert("AI Suggestion: Consider improving this highlighted region!");
+    }
+
+    function enableNoteMode() {
+      noteMode = true;
+      alert("Click on canvas to place a typed note.");
+    }
+
+    function enableVoiceNote() {
+      voiceNote = true;
+      alert("🎙️ Speak now, then click canvas to place note...");
+
+      const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+      recognition.lang = "en-US";
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+
+      recognition.onresult = (event) => {
+        capturedSpeech = event.results[0][0].transcript;
+        alert("✅ Speech captured. Click canvas to place note.");
+      };
+
+      recognition.onerror = (event) => {
+        alert("❌ Error capturing speech.");
+        voiceNote = false;
+      };
+
+      recognition.start();
+    }
+
+    function makeTimelapse() {
+      if (snapshots.length === 0) {
+        alert("No drawing recorded yet!");
+        return;
+      }
+
+      const win = window.open();
+      win.document.write("<h2>Timelapse Playback</h2>");
+      win.document.write("<img id='tl-img' width='800' height='500'>");
+
+      let index = 0;
+      const img = win.document.getElementById("tl-img");
+
+      const interval = setInterval(() => {
+        if (index >= snapshots.length) {
+          clearInterval(interval);
+          win.document.write("<p><strong>End of Timelapse</strong></p>");
+          return;
+        }
+        img.src = snapshots[index];
+        index++;
+      }, 400);
+    }
+
+    function startColorPicker() {
+      const video = document.getElementById("video");
+      const wrapper = document.getElementById("videoWrapper");
+      wrapper.style.display = "block";
+
+      navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => {
+        video.srcObject = stream;
+
+        video.onclick = function (e) {
+          const tempCanvas = document.createElement("canvas");
+          tempCanvas.width = video.videoWidth;
+          tempCanvas.height = video.videoHeight;
+          const tempCtx = tempCanvas.getContext("2d");
+          tempCtx.drawImage(video, 0, 0);
+
+          const rect = video.getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const y = e.clientY - rect.top;
+
+          const pixel = tempCtx.getImageData(x, y, 1, 1).data;
+          const color = `rgb(${pixel[0]}, ${pixel[1]}, ${pixel[2]})`;
+          currentColor = color;
+          document.getElementById("colorPicker").value = rgbToHex(pixel[0], pixel[1], pixel[2]);
+
+          alert(`🎨 Picked Color: ${color}`);
+          stream.getTracks().forEach(track => track.stop());
+          wrapper.style.display = "none";
+        };
+      }).catch((err) => {
+        alert("❌ Could not access camera.");
+        console.error(err);
+      });
+    }
+
+    function rgbToHex(r, g, b) {
+      return "#" + [r, g, b].map(x => x.toString(16).padStart(2, "0")).join("");
+    }
+  </script>
+</body>
+</html>
